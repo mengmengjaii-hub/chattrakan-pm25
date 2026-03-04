@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PM 2.5 Dashboard | ชาติตระการ</title>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Sarabun:wght@300;400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #070b12;
+    --surface: #0e1420;
+    --surface2: #131a28;
+    --border: #1e2d42;
+    --text: #e2eaf5;
+    --muted: #4a6080;
+    --accent: #38bdf8;
+    --accent2: #0ea5e9;
+    --good: #22c55e;
+    --moderate: #f59e0b;
+    --unhealthy: #f97316;
+    --danger: #ef4444;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Sarabun', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ===== ALERT BANNER ===== */
+  #alert-banner {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 9999;
+    background: linear-gradient(135deg, #7f1d1d, #dc2626, #7f1d1d);
+    background-size: 200% 100%;
+    animation: alertPulse 2s ease infinite, slideDown 0.5s ease;
+    border-bottom: 3px solid #fca5a5;
+    padding: 14px 24px;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    text-align: center;
+    box-shadow: 0 4px 40px rgba(239, 68, 68, 0.6);
+  }
+
+  #alert-banner.show {
+    display: flex;
+  }
+
+  @keyframes alertPulse {
+    0%, 100% { background-position: 0% 0%; }
+    50% { background-position: 100% 0%; }
+  }
+
+  @keyframes slideDown {
+    from { transform: translateY(-100%); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  .alert-icon { font-size: 28px; animation: shake 0.5s ease infinite alternate; }
+  @keyframes shake {
+    from { transform: rotate(-8deg) scale(1.1); }
+    to { transform: rotate(8deg) scale(0.95); }
+  }
+
+  .alert-title {
+    font-family: 'Oswald', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 2px;
+    text-shadow: 0 0 20px rgba(255,255,255,0.4);
+  }
+
+  .alert-sub {
+    font-size: 13px;
+    color: #fecaca;
+    font-weight: 300;
+  }
+
+  .alert-close {
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    color: #fff;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+  }
+  .alert-close:hover { background: rgba(255,255,255,0.3); }
+
+  /* ===== HEADER ===== */
+  header {
+    background: linear-gradient(180deg, #0d1623 0%, var(--bg) 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 18px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .header-left h1 {
+    font-family: 'Oswald', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 1px;
+  }
+  .header-left p {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .live-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    border-radius: 20px;
+    padding: 5px 12px;
+    font-size: 11px;
+    color: #22c55e;
+    font-family: 'Oswald', sans-serif;
+    letter-spacing: 1px;
+  }
+
+  .live-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #22c55e;
+    animation: blink 1.2s ease infinite;
+  }
+  @keyframes blink { 0%,100%{opacity:1;} 50%{opacity:0.2;} }
+
+  #update-time {
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* ===== MAIN LAYOUT ===== */
+  main {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  /* ===== TOP STATS ===== */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+  }
+  @media (max-width: 800px) { .stats-row { grid-template-columns: repeat(2,1fr); } }
+  @media (max-width: 480px) { .stats-row { grid-template-columns: 1fr; } }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    border-top: 3px solid var(--accent);
+  }
+
+  .stat-label {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+  }
+
+  .stat-value {
+    font-family: 'Oswald', sans-serif;
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .stat-unit { font-size: 13px; font-weight: 300; color: var(--muted); }
+
+  /* ===== MAP + SIDEBAR ===== */
+  .map-row {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 18px;
+  }
+  @media (max-width: 900px) { .map-row { grid-template-columns: 1fr; } }
+
+  #map {
+    height: 420px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 420px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+  .sidebar::-webkit-scrollbar { width: 4px; }
+  .sidebar::-webkit-scrollbar-track { background: var(--surface); border-radius: 4px; }
+  .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  .tb-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid #333;
+    border-radius: 10px;
+    padding: 12px 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .tb-card:hover { background: var(--surface2); transform: translateX(3px); }
+
+  .tb-name {
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
+
+  .tb-val {
+    font-family: 'Oswald', sans-serif;
+    font-size: 24px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .tb-badge {
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 20px;
+    font-family: 'Oswald', sans-serif;
+    letter-spacing: 0.5px;
+    border: 1px solid currentColor;
+  }
+
+  /* ===== CHART ===== */
+  .chart-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px;
+  }
+
+  .chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .chart-title {
+    font-family: 'Oswald', sans-serif;
+    font-size: 16px;
+    color: var(--accent);
+    letter-spacing: 0.5px;
+  }
+
+  .legend-row {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .legend-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+  }
+
+  /* ===== THRESHOLD LINE ===== */
+  .threshold-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 10px;
+  }
+
+  .threshold-line {
+    width: 30px;
+    height: 2px;
+    background: #ef4444;
+    border-top: 2px dashed #ef4444;
+  }
+
+  /* ===== FOOTER ===== */
+  footer {
+    text-align: center;
+    padding: 16px;
+    font-size: 11px;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+  }
+
+  /* AQI color map */
+  .c-good { color: #22c55e; border-color: #22c55e !important; }
+  .c-moderate { color: #f59e0b; border-color: #f59e0b !important; }
+  .c-unhealthy { color: #f97316; border-color: #f97316 !important; }
+  .c-danger { color: #ef4444; border-color: #ef4444 !important; }
+  .c-hazard { color: #a855f7; border-color: #a855f7 !important; }
+
+  .bl-good { border-left-color: #22c55e !important; }
+  .bl-moderate { border-left-color: #f59e0b !important; }
+  .bl-unhealthy { border-left-color: #f97316 !important; }
+  .bl-danger { border-left-color: #ef4444 !important; }
+  .bl-hazard { border-left-color: #a855f7 !important; }
+
+  .bg-good { background: rgba(34,197,94,0.08); }
+  .bg-moderate { background: rgba(245,158,11,0.08); }
+  .bg-unhealthy { background: rgba(249,115,22,0.08); }
+  .bg-danger { background: rgba(239,68,68,0.12); }
+
+  /* Glow effect for danger cards */
+  .tb-card.bl-danger { box-shadow: 0 0 12px rgba(239,68,68,0.2); }
+  .tb-card.bl-hazard { box-shadow: 0 0 12px rgba(168,85,247,0.2); }
+</style>
+</head>
+<body>
+
+<!-- ===== ALERT BANNER ===== -->
+<div id="alert-banner">
+  <button class="alert-close" onclick="document.getElementById('alert-banner').classList.remove('show')" title="ปิด">✕</button>
+  <div class="alert-icon">⚠️</div>
+  <div class="alert-title">⚠ คำเตือนคุณภาพอากาศ — ระดับอันตราย ⚠</div>
+  <div class="alert-sub" id="alert-detail">ค่าฝุ่น PM 2.5 เกินเกณฑ์อันตราย (50 µg/m³) — หลีกเลี่ยงกิจกรรมกลางแจ้ง สวมหน้ากากชนิด N95 ทุกครั้ง</div>
+</div>
+
+<!-- ===== HEADER ===== -->
+<header>
+  <div class="header-left">
+    <h1>🌫 CHATTRAKAN PM 2.5 DASHBOARD</h1>
+    <p>ข้อมูลคุณภาพอากาศรายตำบล • อ.ชาติตระการ จ.พิษณุโลก • แหล่งข้อมูล: GISTDA</p>
+  </div>
+  <div class="header-right">
+    <div class="live-badge"><div class="live-dot"></div> LIVE</div>
+    <div id="update-time">อัปเดตล่าสุด: --:--</div>
+  </div>
+</header>
+
+<!-- ===== MAIN ===== -->
+<main>
+
+  <!-- STATS ROW -->
+  <div class="stats-row">
+    <div class="stat-card" style="border-top-color:#38bdf8">
+      <div class="stat-label">📍 จำนวนตำบล</div>
+      <div class="stat-value" style="color:#38bdf8" id="stat-total">—</div>
+      <div class="stat-unit">ตำบล</div>
+    </div>
+    <div class="stat-card" style="border-top-color:#22c55e">
+      <div class="stat-label">📊 ค่าเฉลี่ยรวม</div>
+      <div class="stat-value" style="color:#22c55e" id="stat-avg">—</div>
+      <div class="stat-unit">µg/m³</div>
+    </div>
+    <div class="stat-card" style="border-top-color:#ef4444">
+      <div class="stat-label">🔺 สูงสุด</div>
+      <div class="stat-value" style="color:#ef4444" id="stat-max">—</div>
+      <div class="stat-unit">µg/m³</div>
+    </div>
+    <div class="stat-card" style="border-top-color:#a855f7">
+      <div class="stat-label">⚠ เกิน 50 µg/m³</div>
+      <div class="stat-value" style="color:#a855f7" id="stat-danger">—</div>
+      <div class="stat-unit">ตำบล</div>
+    </div>
+  </div>
+
+  <!-- MAP + SIDEBAR -->
+  <div class="map-row">
+    <div id="map"></div>
+    <div class="sidebar" id="tambon-list">
+      <p style="color:var(--muted); text-align:center; padding:20px;">กำลังโหลดข้อมูล...</p>
+    </div>
+  </div>
+
+  <!-- CHART -->
+  <div class="chart-card">
+    <div class="chart-header">
+      <div class="chart-title">📈 เปรียบเทียบค่าฝุ่น PM 2.5 รายตำบล</div>
+      <div class="legend-row">
+        <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>ดีมาก (≤15)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>ปานกลาง (≤25)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#f97316"></div>มีผลต่อสุขภาพ (≤37.5)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>อันตราย (≤50)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#a855f7"></div>อันตรายมาก (>50)</div>
+      </div>
+    </div>
+    <canvas id="pmChart" height="80"></canvas>
+    <div class="threshold-info">
+      <div class="threshold-line"></div>
+      เส้นประแดง = เกณฑ์อันตราย 50 µg/m³
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  CHATTRAKAN PM 2.5 REAL-TIME DASHBOARD • ข้อมูลอ้างอิง GISTDA • ©2567 — ทุก 30 นาที
+</footer>
+
+<script>
+// =====================
+// DATA (Mock เหมือนข้อมูลจริงจาก GISTDA API)
+// =====================
+const TAMBONS = [
+  { name: "ชาติตระการ",  lat: 17.286, lng: 100.692, pm: 28.4 },
+  { name: "สวนเมี่ยง",   lat: 17.310, lng: 100.711, pm: 52.1 }, // เกิน 50
+  { name: "บ้านดง",      lat: 17.255, lng: 100.658, pm: 41.7 },
+  { name: "ป่าแดง",      lat: 17.320, lng: 100.640, pm: 63.5 }, // เกิน 50
+
+  { name: "บ่อภาค",      lat: 17.275, lng: 100.670, pm: 34.8 },
+  { name: "ท่าสะแก",     lat: 17.295, lng: 100.735, pm: 12.5 },
+];
+
+// =====================
+// HELPERS
+// =====================
+function getLevel(pm) {
+  if (pm <= 15)   return { label:"ดีมาก",        cls:"good",      color:"#22c55e" };
+  if (pm <= 25)   return { label:"ปานกลาง",      cls:"moderate",  color:"#f59e0b" };
+  if (pm <= 37.5) return { label:"มีผลต่อสุขภาพ", cls:"unhealthy", color:"#f97316" };
+  if (pm <= 50)   return { label:"เริ่มอันตราย",  cls:"danger",    color:"#ef4444" };
+  return            { label:"อันตรายมาก",   cls:"hazard",    color:"#a855f7" };
+}
+
+function formatTime() {
+  const now = new Date();
+  return now.toLocaleTimeString('th-TH', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+
+// =====================
+// MAP
+// =====================
+const map = L.map('map', { zoomControl: true }).setView([17.275, 100.681], 11);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© CartoDB',
+  maxZoom: 18
+}).addTo(map);
+
+// =====================
+// ALERT CHECK
+// =====================
+function checkAlert(data) {
+  const dangerous = data.filter(d => d.pm > 50);
+  const banner = document.getElementById('alert-banner');
+  if (dangerous.length > 0) {
+    const names = dangerous.map(d => `ต.${d.name} (${d.pm} µg/m³)`).join(', ');
+    document.getElementById('alert-detail').textContent =
+      `ค่าฝุ่น PM 2.5 เกินเกณฑ์อันตราย 50 µg/m³ ใน ${dangerous.length} ตำบล: ${names} — กรุณาสวม N95 และหลีกเลี่ยงกิจกรรมกลางแจ้ง`;
+    banner.classList.add('show');
+  } else {
+    banner.classList.remove('show');
+  }
+}
+
+// =====================
+// RENDER
+// =====================
+let pmChart = null;
+let markers = [];
+
+function render(data) {
+  // Clear old markers
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+
+  const listEl = document.getElementById('tambon-list');
+  listEl.innerHTML = '';
+
+  const labels = [], values = [], colors = [];
+
+  let total = data.length;
+  let sum = 0, maxPm = 0, dangerCount = 0;
+
+  data.forEach(item => {
+    const pm = parseFloat(item.pm);
+    const lv = getLevel(pm);
+    sum += pm;
+    if (pm > maxPm) maxPm = pm;
+    if (pm > 50) dangerCount++;
+
+    labels.push(`ต.${item.name}`);
+    values.push(pm.toFixed(1));
+    colors.push(lv.color);
+
+    // Map circle
+    const circle = L.circle([item.lat, item.lng], {
+      color: lv.color,
+      fillColor: lv.color,
+      fillOpacity: 0.35,
+      weight: 2,
+      radius: 2800
+    }).addTo(map)
+      .bindPopup(`
+        <div style="font-family:Sarabun,sans-serif; min-width:130px;">
+          <b style="color:${lv.color}; font-size:15px;">ต.${item.name}</b><br>
+          <span style="font-size:22px; font-weight:700; color:${lv.color};">${pm.toFixed(1)}</span>
+          <span style="font-size:11px; color:#888;"> µg/m³</span><br>
+          <span style="font-size:11px;">${lv.label}</span>
+        </div>
+      `);
+    markers.push(circle);
+
+    // Sidebar card
+    const card = document.createElement('div');
+    card.className = `tb-card bl-${lv.cls}`;
+    card.innerHTML = `
+      <div>
+        <div class="tb-name">ต.${item.name}</div>
+        <div class="tb-val c-${lv.cls}">${pm.toFixed(1)} <span style="font-size:12px;font-weight:300;color:var(--muted);">µg/m³</span></div>
+      </div>
+      <span class="tb-badge c-${lv.cls}">${lv.label}</span>
+    `;
+    card.onclick = () => {
+      map.flyTo([item.lat, item.lng], 13, { duration: 1.2 });
+      circle.openPopup();
+    };
+    listEl.appendChild(card);
+  });
+
+  // Stats
+  document.getElementById('stat-total').textContent = total;
+  document.getElementById('stat-avg').textContent = (sum / total).toFixed(1);
+  document.getElementById('stat-max').textContent = maxPm.toFixed(1);
+  document.getElementById('stat-danger').textContent = dangerCount;
+
+  // Chart
+  const ctx = document.getElementById('pmChart').getContext('2d');
+  if (pmChart) pmChart.destroy();
+
+  const dangerLine = {
+    id: 'dangerLine',
+    afterDraw(chart) {
+      const { ctx, chartArea: { left, right }, scales: { y } } = chart;
+      const y50 = y.getPixelForValue(50);
+      ctx.save();
+      ctx.beginPath();
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 2;
+      ctx.moveTo(left, y50);
+      ctx.lineTo(right, y50);
+      ctx.stroke();
+      ctx.fillStyle = '#ef4444';
+      ctx.font = '11px Sarabun';
+      ctx.fillText('เกณฑ์อันตราย 50 µg/m³', right - 160, y50 - 6);
+      ctx.restore();
+    }
+  };
+
+  pmChart = new Chart(ctx, {
+    type: 'bar',
+    plugins: [dangerLine],
+    data: {
+      labels,
+      datasets: [{
+        label: 'PM 2.5 (µg/m³)',
+        data: values,
+        backgroundColor: colors.map(c => c + 'bb'),
+        borderColor: colors,
+        borderWidth: 2,
+        borderRadius: 6,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.parsed.y} µg/m³`
+          }
+        }
+      },
+      scales: {
+        x: { grid: { color: '#1e2d42' }, ticks: { color: '#4a6080', font: { family: 'Sarabun' } } },
+        y: {
+          beginAtZero: true,
+          grid: { color: '#1e2d42' },
+          ticks: { color: '#4a6080', callback: v => v + ' µg' }
+        }
+      }
+    }
+  });
+
+  // Alert
+  checkAlert(data);
+
+  // Time
+  document.getElementById('update-time').textContent = `อัปเดตล่าสุด: ${formatTime()}`;
+}
+
+// =====================
+// SIMULATE LIVE UPDATE
+// =====================
+function simulateLive() {
+  return TAMBONS.map(t => ({
+    ...t,
+    pm: Math.max(5, t.pm + (Math.random() - 0.5) * 4)
+  }));
+}
+
+render(simulateLive());
+setInterval(() => render(simulateLive()), 30000); // อัปเดตทุก 30 วินาที (demo)
+</script>
+</body>
+</html>
